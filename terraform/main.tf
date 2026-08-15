@@ -258,7 +258,35 @@ resource "aws_cloudwatch_metric_alarm" "ecs_high_cpu" {
 }
 
 # ==============================================================================
-# 5. APPLICATION LOAD BALANCER (ALB)
+# 5. SERVICE DISCOVERY (Cloud Map for Internal DNS Resolution)
+# ==============================================================================
+resource "aws_service_discovery_private_dns_namespace" "main" {
+  name        = "kamrial.local"
+  description = "Private DNS namespace for ECS microservices"
+  vpc         = aws_vpc.main.id
+}
+
+resource "aws_service_discovery_service" "rabbitmq" {
+  name = "rabbitmq"
+
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.main.id
+
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+
+    routing_policy = "MULTIVALUE"
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
+  }
+}
+
+# ==============================================================================
+# 6. APPLICATION LOAD BALANCER (ALB)
 # ==============================================================================
 resource "aws_lb" "main" {
   name               = "kamrial-alb"
@@ -296,7 +324,7 @@ resource "aws_lb_listener" "http" {
 }
 
 # ==============================================================================
-# 6. DATABASE (RDS)
+# 7. DATABASE (RDS)
 # ==============================================================================
 resource "aws_db_subnet_group" "main" {
   name       = "kamrial-db-subnet-group"
@@ -318,7 +346,7 @@ resource "aws_db_instance" "postgres" {
 }
 
 # ==============================================================================
-# 7. CONTAINER REGISTRIES, RABBITMQ QUEUE, TASKS & SERVICES
+# 8. CONTAINER REGISTRIES, RABBITMQ QUEUE, TASKS & SERVICES
 # ==============================================================================
 resource "aws_ecr_repository" "api" { name = "kamrial-api" }
 resource "aws_ecr_repository" "worker" { name = "kamrial-worker" }
@@ -365,6 +393,10 @@ resource "aws_ecs_service" "rabbitmq" {
     security_groups  = [aws_security_group.app_sg.id]
     assign_public_ip = false
   }
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.rabbitmq.arn
+  }
 }
 
 # API Task Definition & Service
@@ -386,7 +418,7 @@ resource "aws_ecs_task_definition" "api" {
     }]
     environment = [{
       name  = "RABBITMQ_HOST"
-      value = "kamrial-rabbitmq-service"
+      value = "rabbitmq.kamrial.local"
     }]
     secrets = [{
       name      = "DB_PASSWORD"
@@ -445,7 +477,7 @@ resource "aws_ecs_task_definition" "worker" {
     essential = true
     environment = [{
       name  = "RABBITMQ_HOST"
-      value = "kamrial-rabbitmq-service"
+      value = "rabbitmq.kamrial.local"
     }]
     secrets = [{
       name      = "DB_PASSWORD"
