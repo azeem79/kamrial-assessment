@@ -41,7 +41,7 @@ resource "aws_subnet" "public_b" {
   tags = { Name = "kamrial-public-b" }
 }
 
-# Private Subnets (For Apps & DB)
+# Private Subnets (For Apps, Worker, RabbitMQ & DB)
 resource "aws_subnet" "private_a" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.2.0/24"
@@ -146,7 +146,7 @@ resource "aws_security_group" "alb_sg" {
 
 resource "aws_security_group" "app_sg" {
   name        = "kamrial-app-sg"
-  description = "Allow ALB traffic only"
+  description = "Allow ALB traffic and inter-service container access"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -154,6 +154,20 @@ resource "aws_security_group" "app_sg" {
     to_port         = 8000
     protocol        = "tcp"
     security_groups = [aws_security_group.alb_sg.id]
+  }
+
+  ingress {
+    from_port = 5672
+    to_port   = 5672
+    protocol  = "tcp"
+    self      = true
+  }
+
+  ingress {
+    from_port = 15672
+    to_port   = 15672
+    protocol  = "tcp"
+    self      = true
   }
 
   egress {
@@ -205,7 +219,6 @@ resource "aws_iam_role_policy_attachment" "ecs_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# Policy allowing execution role to read auto-generated DB master secret
 resource "aws_iam_role_policy" "read_db_secret" {
   name = "kamrial-read-db-secret"
   role = aws_iam_role.ecs_execution.id
@@ -221,11 +234,27 @@ resource "aws_iam_role_policy" "read_db_secret" {
 }
 
 # ==============================================================================
-# 4. OBSERVABILITY (CLOUDWATCH LOG GROUP)
+# 4. OBSERVABILITY (CLOUDWATCH LOG GROUP & ALARM)
 # ==============================================================================
 resource "aws_cloudwatch_log_group" "ecs" {
   name              = "/ecs/kamrial"
   retention_in_days = 14
+}
+
+resource "aws_cloudwatch_metric_alarm" "ecs_high_cpu" {
+  alarm_name          = "kamrial-ecs-high-cpu-utilization"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 2
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
+  period              = 120
+  statistic           = "Average"
+  threshold           = 80
+  alarm_description   = "Triggers when ECS CPU utilization exceeds 80% for 4 minutes."
+
+  dimensions = {
+    ClusterName = aws_ecs_cluster.main.name
+  }
 }
 
 # ==============================================================================
@@ -289,13 +318,56 @@ resource "aws_db_instance" "postgres" {
 }
 
 # ==============================================================================
-# 7. CONTAINER REGISTRIES, TASK DEFINITIONS & SERVICES
+# 7. CONTAINER REGISTRIES, RABBITMQ QUEUE, TASKS & SERVICES
 # ==============================================================================
 resource "aws_ecr_repository" "api" { name = "kamrial-api" }
 resource "aws_ecr_repository" "worker" { name = "kamrial-worker" }
 
 resource "aws_ecs_cluster" "main" { name = "kamrial-cluster" }
 
+# RabbitMQ Message Broker Definition & Service
+resource "aws_ecs_task_definition" "rabbitmq" {
+  family                   = "kamrial-rabbitmq-task"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.ecs_execution.arn
+
+  container_definitions = jsonencode([{
+    name      = "rabbitmq"
+    image     = "rabbitmq:3-management-alpine"
+    essential = true
+    portMappings = [
+      { containerPort = 5672, hostPort = 5672 },
+      { containerPort = 15672, hostPort = 15672 }
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.ecs.name
+        "awslogs-region"        = var.aws_region
+        "awslogs-stream-prefix" = "rabbitmq"
+      }
+    }
+  }])
+}
+
+resource "aws_ecs_service" "rabbitmq" {
+  name            = "kamrial-rabbitmq-service"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.rabbitmq.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+    security_groups  = [aws_security_group.app_sg.id]
+    assign_public_ip = false
+  }
+}
+
+# API Task Definition & Service
 resource "aws_ecs_task_definition" "api" {
   family                   = "kamrial-api-task"
   network_mode             = "awsvpc"
@@ -312,6 +384,10 @@ resource "aws_ecs_task_definition" "api" {
       containerPort = 8000
       hostPort      = 8000
     }]
+    environment = [{
+      name  = "RABBITMQ_HOST"
+      value = "kamrial-rabbitmq-service"
+    }]
     secrets = [{
       name      = "DB_PASSWORD"
       valueFrom = aws_db_instance.postgres.master_user_secret[0].secret_arn
@@ -321,34 +397,7 @@ resource "aws_ecs_task_definition" "api" {
       options = {
         "awslogs-group"         = aws_cloudwatch_log_group.ecs.name
         "awslogs-region"        = var.aws_region
-        "awslogs-stream-prefix" = "ecs"
-      }
-    }
-  }])
-}
-
-resource "aws_ecs_task_definition" "worker" {
-  family                   = "kamrial-worker-task"
-  network_mode             = "awsvpc"
-  requires_compatibilities = ["FARGATE"]
-  cpu                      = "256"
-  memory                   = "512"
-  execution_role_arn       = aws_iam_role.ecs_execution.arn
-
-  container_definitions = jsonencode([{
-    name      = "worker"
-    image     = "${aws_ecr_repository.worker.repository_url}:latest"
-    essential = true
-    secrets = [{
-      name      = "DB_PASSWORD"
-      valueFrom = aws_db_instance.postgres.master_user_secret[0].secret_arn
-    }]
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        "awslogs-group"         = aws_cloudwatch_log_group.ecs.name
-        "awslogs-region"        = var.aws_region
-        "awslogs-stream-prefix" = "ecs"
+        "awslogs-stream-prefix" = "api"
       }
     }
   }])
@@ -376,8 +425,41 @@ resource "aws_ecs_service" "api" {
   depends_on = [
     aws_lb_listener.http,
     aws_iam_role_policy.read_db_secret,
-    aws_iam_role_policy_attachment.ecs_execution
+    aws_iam_role_policy_attachment.ecs_execution,
+    aws_ecs_service.rabbitmq
   ]
+}
+
+# Worker Task Definition & Service
+resource "aws_ecs_task_definition" "worker" {
+  family                   = "kamrial-worker-task"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.ecs_execution.arn
+
+  container_definitions = jsonencode([{
+    name      = "worker"
+    image     = "${aws_ecr_repository.worker.repository_url}:latest"
+    essential = true
+    environment = [{
+      name  = "RABBITMQ_HOST"
+      value = "kamrial-rabbitmq-service"
+    }]
+    secrets = [{
+      name      = "DB_PASSWORD"
+      valueFrom = aws_db_instance.postgres.master_user_secret[0].secret_arn
+    }]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.ecs.name
+        "awslogs-region"        = var.aws_region
+        "awslogs-stream-prefix" = "worker"
+      }
+    }
+  }])
 }
 
 resource "aws_ecs_service" "worker" {
@@ -395,36 +477,7 @@ resource "aws_ecs_service" "worker" {
 
   depends_on = [
     aws_iam_role_policy.read_db_secret,
-    aws_iam_role_policy_attachment.ecs_execution
+    aws_iam_role_policy_attachment.ecs_execution,
+    aws_ecs_service.rabbitmq
   ]
-}
-# Message Queue for Cloud Infrastructure
-resource "aws_sqs_queue" "app_queue" {
-  name                      = "kamrial-app-queue"
-  delay_seconds             = 0
-  max_message_size          = 262144
-  message_retention_seconds = 86400
-  receive_wait_time_seconds = 10
-
-  tags = {
-    Environment = "production"
-    Project     = "kamrial-assessment"
-  }
-}
-
-# CloudWatch Metric Alarm for High CPU
-resource "aws_cloudwatch_metric_alarm" "ecs_high_cpu" {
-  alarm_name          = "kamrial-ecs-high-cpu-utilization"
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  evaluation_periods  = 2
-  metric_name         = "CPUUtilization"
-  namespace           = "AWS/ECS"
-  period              = 120
-  statistic           = "Average"
-  threshold           = 80
-  alarm_description   = "Triggers when ECS CPU utilization exceeds 80% for 4 minutes."
-
-  dimensions = {
-    ClusterName = aws_ecs_cluster.main.name
-  }
 }
