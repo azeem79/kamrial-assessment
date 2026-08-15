@@ -33,6 +33,6 @@ This document outlines the security controls, identity management, threat mitiga
 
 ---
 
-## 6. Audit Logging & Compliance Monitoring
-* **AWS CloudTrail Integration:** AWS CloudTrail is designated to capture management and data events across all AWS account API activities. Every request — whether originating from IAM users, Terraform provisioning runs, or automated ECS execution roles — is logged for audit trail and forensic readiness.
-* **Network & Access Auditing:** VPC Flow Logs capture IP traffic entering and leaving network interfaces across the public and private subnets, ensuring full visibility into inbound and egress network patterns.
+## 6. Audit Logging & Compliance Strategy
+* **CloudTrail & Audit Logging Strategy:** CloudTrail API event capturing and VPC Flow Logs are designated as operational target capabilities. They are deliberately deferred from current IaC provisioning to avoid baseline cost overhead, with provisioning triggered upon multi-environment staging expansion.
+* **Access Visibility:** Local container access relies on stdout log drivers; VPC Flow Logs are identified as the primary target for network packet auditing in multi-tenant environments.
