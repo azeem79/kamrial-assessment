@@ -21,7 +21,7 @@ locals {
 }
 
 # ==============================================================================
-# NETWORK ARCHITECTURE (VPC, SUBNETS, GATEWAYS)
+# 1. NETWORK ARCHITECTURE (VPC, SUBNETS, GATEWAYS)
 # ==============================================================================
 
 resource "aws_vpc" "main" {
@@ -42,6 +42,17 @@ resource "aws_subnet" "public_a" {
 
   tags = merge(local.common_tags, {
     Name = "${var.app_name}-public-subnet-a"
+  })
+}
+
+resource "aws_subnet" "public_b" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.4.0/24"
+  availability_zone       = "${var.aws_region}b"
+  map_public_ip_on_launch = true
+
+  tags = merge(local.common_tags, {
+    Name = "${var.app_name}-public-subnet-b"
   })
 }
 
@@ -104,6 +115,11 @@ resource "aws_route_table_association" "public_a" {
   route_table_id = aws_route_table.public.id
 }
 
+resource "aws_route_table_association" "public_b" {
+  subnet_id      = aws_subnet.public_b.id
+  route_table_id = aws_route_table.public.id
+}
+
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
 
@@ -128,7 +144,400 @@ resource "aws_route_table_association" "private_b" {
 }
 
 # ==============================================================================
-# OBSERVABILITY & ALARMING
+# 2. SECURITY GROUPS (ALB -> APP -> DB TIERING)
+# ==============================================================================
+
+resource "aws_security_group" "alb" {
+  name        = "${var.app_name}-alb-sg"
+  description = "Public ALB security group"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description = "Allow HTTP from anywhere"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "Allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    ="-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.app_name}-alb-sg"
+  })
+}
+
+resource "aws_security_group" "ecs" {
+  name        = "${var.app_name}-ecs-sg"
+  description = "ECS tasks security group"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description     = "Allow inbound HTTP traffic from ALB"
+    from_port       = 8000
+    to_port         = 8000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  egress {
+    description = "Allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.app_name}-ecs-sg"
+  })
+}
+
+resource "aws_security_group" "db" {
+  name        = "${var.app_name}-db-sg"
+  description = "RDS PostgreSQL security group"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description     = "Allow PostgreSQL access from ECS tasks"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.ecs.id]
+  }
+
+  egress {
+    description = "Allow outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.app_name}-db-sg"
+  })
+}
+
+# ==============================================================================
+# 3. CONTAINER REGISTRIES (ECR)
+# ==============================================================================
+
+resource "aws_ecr_repository" "api" {
+  name                 = "${var.app_name}-api"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_ecr_repository" "worker" {
+  name                 = "${var.app_name}-worker"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = local.common_tags
+}
+
+# ==============================================================================
+# 4. LOAD BALANCER (ALB)
+# ==============================================================================
+
+resource "aws_lb" "main" {
+  name               = "${var.app_name}-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
+  subnets            = [aws_subnet.public_a.id, aws_subnet.public_b.id]
+
+  tags = merge(local.common_tags, {
+    Name = "${var.app_name}-alb"
+  })
+}
+
+resource "aws_lb_target_group" "api" {
+  name        = "${var.app_name}-api-tg"
+  port        = 8000
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "ip"
+
+  health_check {
+    path                = "/"
+    protocol            = "HTTP"
+    matcher             = "200"
+    interval            = 15
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.main.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.api.arn
+  }
+}
+
+# ==============================================================================
+# 5. DATABASE & SECRETS MANAGEMENT
+# ==============================================================================
+
+resource "aws_db_subnet_group" "main" {
+  name       = "${var.app_name}-db-subnet-group"
+  subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+
+  tags = local.common_tags
+}
+
+resource "random_password" "db_password" {
+  length  = 16
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "db_credentials" {
+  name                    = "${var.app_name}-db-credentials"
+  recovery_window_in_days = 0
+
+  tags = local.common_tags
+}
+
+resource "aws_secretsmanager_secret_version" "db_credentials" {
+  secret_id = aws_secretsmanager_secret.db_credentials.id
+  secret_string = jsonencode({
+    username = "postgres"
+    password = random_password.db_password.result
+    engine   = "postgres"
+    host     = aws_db_instance.postgres.address
+    port     = 5432
+    dbname   = "kamrial"
+  })
+}
+
+resource "aws_db_instance" "postgres" {
+  identifier             = "${var.app_name}-postgres"
+  engine                 = "postgres"
+  engine_version         = "15"
+  instance_class         = "db.t4g.micro"
+  allocated_storage      = 20
+  max_allocated_storage  = 50
+  db_name                = "kamrial"
+  username               = "postgres"
+  password               = random_password.db_password.result
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+  vpc_security_group_ids = [aws_security_group.db.id]
+  publicly_accessible    = false
+  skip_final_snapshot    = true
+
+  tags = merge(local.common_tags, {
+    Name = "${var.app_name}-postgres"
+  })
+}
+
+# ==============================================================================
+# 6. IAM ROLES & POLICIES
+# ==============================================================================
+
+resource "aws_iam_role" "ecs_execution" {
+  name = "${var.app_name}-ecs-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_execution" {
+  role       = aws_iam_role.ecs_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+resource "aws_iam_policy" "ecs_secrets" {
+  name        = "${var.app_name}-ecs-secrets-policy"
+  description = "Allows ECS tasks to read secrets from Secrets Manager"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [aws_secretsmanager_secret.db_credentials.arn]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_execution_secrets" {
+  role       = aws_iam_role.ecs_execution.name
+  policy_arn = aws_iam_policy.ecs_secrets.arn
+}
+
+resource "aws_iam_role" "ecs_task" {
+  name = "${var.app_name}-ecs-task-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+# ==============================================================================
+# 7. ECS CLUSTER & SERVICES
+# ==============================================================================
+
+resource "aws_ecs_cluster" "main" {
+  name = "${var.app_name}-cluster"
+
+  tags = local.common_tags
+}
+
+resource "aws_ecs_task_definition" "api" {
+  family                   = "${var.app_name}-api"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.ecs_execution.arn
+  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "${var.app_name}-api"
+      image     = "${aws_ecr_repository.api.repository_url}:latest"
+      essential = true
+      portMappings = [
+        {
+          containerPort = 8000
+          hostPort      = 8000
+          protocol      = "tcp"
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.ecs.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "api"
+        }
+      }
+    }
+  ])
+
+  tags = local.common_tags
+}
+
+resource "aws_ecs_task_definition" "worker" {
+  family                   = "${var.app_name}-worker"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.ecs_execution.arn
+  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "${var.app_name}-worker"
+      image     = "${aws_ecr_repository.worker.repository_url}:latest"
+      essential = true
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.ecs.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "worker"
+        }
+      }
+    }
+  ])
+
+  tags = local.common_tags
+}
+
+resource "aws_ecs_service" "api" {
+  name            = "${var.app_name}-api-service"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.api.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+    security_groups  = [aws_security_group.ecs.id]
+    assign_public_ip = false
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.api.arn
+    container_name   = "${var.app_name}-api"
+    container_port   = 8000
+  }
+
+  depends_on = [aws_lb_listener.http]
+
+  tags = local.common_tags
+}
+
+resource "aws_ecs_service" "worker" {
+  name            = "${var.app_name}-worker-service"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.worker.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+    security_groups  = [aws_security_group.ecs.id]
+    assign_public_ip = false
+  }
+
+  tags = local.common_tags
+}
+
+# ==============================================================================
+# 8. OBSERVABILITY & ALARMING
 # ==============================================================================
 
 resource "aws_cloudwatch_log_group" "ecs" {
@@ -150,7 +559,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_high_cpu" {
   alarm_description   = "Triggered when ECS cluster CPU exceeds 80%"
 
   dimensions = {
-    ClusterName = "${var.app_name}-cluster"
+    ClusterName = aws_ecs_cluster.main.name
   }
 
   tags = local.common_tags
