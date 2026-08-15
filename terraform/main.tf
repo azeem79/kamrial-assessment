@@ -1,4 +1,5 @@
 terraform {
+  required_version = ">= 1.5.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -11,43 +12,47 @@ provider "aws" {
   region = var.aws_region
 }
 
+locals {
+  common_tags = {
+    Project     = "KamrialAssessment"
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
+}
+
 # ==============================================================================
-# 1. NETWORKING (VPC, Subnets, Gateways & Route Tables)
+# NETWORK ARCHITECTURE (VPC, SUBNETS, GATEWAYS)
 # ==============================================================================
+
 resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
+  cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
   enable_dns_support   = true
 
-  tags = { Name = "kamrial-vpc" }
+  tags = merge(local.common_tags, {
+    Name = "${var.app_name}-vpc"
+  })
 }
 
-# Public Subnets (Multi-AZ for ALB)
 resource "aws_subnet" "public_a" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.1.0/24"
   availability_zone       = "${var.aws_region}a"
   map_public_ip_on_launch = true
 
-  tags = { Name = "kamrial-public-a" }
+  tags = merge(local.common_tags, {
+    Name = "${var.app_name}-public-subnet-a"
+  })
 }
 
-resource "aws_subnet" "public_b" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.4.0/24"
-  availability_zone       = "${var.aws_region}b"
-  map_public_ip_on_launch = true
-
-  tags = { Name = "kamrial-public-b" }
-}
-
-# Private Subnets (For Apps, Worker, RabbitMQ & DB)
 resource "aws_subnet" "private_a" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.2.0/24"
   availability_zone = "${var.aws_region}a"
 
-  tags = { Name = "kamrial-private-a" }
+  tags = merge(local.common_tags, {
+    Name = "${var.app_name}-private-subnet-a"
+  })
 }
 
 resource "aws_subnet" "private_b" {
@@ -55,38 +60,43 @@ resource "aws_subnet" "private_b" {
   cidr_block        = "10.0.3.0/24"
   availability_zone = "${var.aws_region}b"
 
-  tags = { Name = "kamrial-private-b" }
+  tags = merge(local.common_tags, {
+    Name = "${var.app_name}-private-subnet-b"
+  })
 }
 
-# Internet Gateway for Public Subnets
-resource "aws_internet_gateway" "gw" {
+resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.main.id
-  tags   = { Name = "kamrial-igw" }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.app_name}-igw"
+  })
 }
 
-# NAT Gateway & Private Route Table
 resource "aws_eip" "nat" {
   domain = "vpc"
-  tags   = { Name = "kamrial-nat-eip" }
 }
 
-resource "aws_nat_gateway" "main" {
+resource "aws_nat_gateway" "nat" {
   allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public_a.id
-  tags          = { Name = "kamrial-nat" }
-  depends_on    = [aws_internet_gateway.gw]
+
+  tags = merge(local.common_tags, {
+    Name = "${var.app_name}-nat-gw"
+  })
 }
 
-# Public Routing
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.gw.id
+    gateway_id = aws_internet_gateway.igw.id
   }
 
-  tags = { Name = "kamrial-public-rt" }
+  tags = merge(local.common_tags, {
+    Name = "${var.app_name}-public-rt"
+  })
 }
 
 resource "aws_route_table_association" "public_a" {
@@ -94,21 +104,17 @@ resource "aws_route_table_association" "public_a" {
   route_table_id = aws_route_table.public.id
 }
 
-resource "aws_route_table_association" "public_b" {
-  subnet_id      = aws_subnet.public_b.id
-  route_table_id = aws_route_table.public.id
-}
-
-# Private Routing via NAT
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
 
   route {
     cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main.id
+    nat_gateway_id = aws_nat_gateway.nat.id
   }
 
-  tags = { Name = "kamrial-private-rt" }
+  tags = merge(local.common_tags, {
+    Name = "${var.app_name}-private-rt"
+  })
 }
 
 resource "aws_route_table_association" "private_a" {
@@ -122,394 +128,49 @@ resource "aws_route_table_association" "private_b" {
 }
 
 # ==============================================================================
-# 2. SECURITY GROUPS
+# OBSERVABILITY & ALARMING
 # ==============================================================================
-resource "aws_security_group" "alb_sg" {
-  name        = "kamrial-alb-sg"
-  description = "Public HTTP"
-  vpc_id      = aws_vpc.main.id
 
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-resource "aws_security_group" "app_sg" {
-  name        = "kamrial-app-sg"
-  description = "Allow ALB traffic and inter-service container access"
-  vpc_id      = aws_vpc.main.id
-
-  ingress {
-    from_port       = 8000
-    to_port         = 8000
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb_sg.id]
-  }
-
-  ingress {
-    from_port = 5672
-    to_port   = 5672
-    protocol  = "tcp"
-    self      = true
-  }
-
-  ingress {
-    from_port = 15672
-    to_port   = 15672
-    protocol  = "tcp"
-    self      = true
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-resource "aws_security_group" "db_sg" {
-  name        = "kamrial-db-sg"
-  description = "Allow App SG traffic only"
-  vpc_id      = aws_vpc.main.id
-
-  ingress {
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.app_sg.id]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-# ==============================================================================
-# 3. IAM EXECUTION ROLE & PERMISSIONS
-# ==============================================================================
-resource "aws_iam_role" "ecs_execution" {
-  name = "kamrial-ecs-execution-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action    = "sts:AssumeRole"
-      Effect    = "Allow"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ecs_execution" {
-  role       = aws_iam_role.ecs_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-}
-
-resource "aws_iam_role_policy" "read_db_secret" {
-  name = "kamrial-read-db-secret"
-  role = aws_iam_role.ecs_execution.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = "secretsmanager:GetSecretValue"
-      Resource = aws_db_instance.postgres.master_user_secret[0].secret_arn
-    }]
-  })
-}
-
-# ==============================================================================
-# 4. OBSERVABILITY (CLOUDWATCH LOG GROUP & ALARM)
-# ==============================================================================
 resource "aws_cloudwatch_log_group" "ecs" {
-  name              = "/ecs/kamrial"
+  name              = "/ecs/${var.app_name}"
   retention_in_days = 14
+
+  tags = local.common_tags
 }
 
 resource "aws_cloudwatch_metric_alarm" "ecs_high_cpu" {
-  alarm_name          = "kamrial-ecs-high-cpu-utilization"
+  alarm_name          = "${var.app_name}-ecs-high-cpu"
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 2
   metric_name         = "CPUUtilization"
   namespace           = "AWS/ECS"
-  period              = 120
+  period              = 60
   statistic           = "Average"
   threshold           = 80
-  alarm_description   = "Triggers when ECS CPU utilization exceeds 80% for 4 minutes."
+  alarm_description   = "Triggered when ECS cluster CPU exceeds 80%"
 
   dimensions = {
-    ClusterName = aws_ecs_cluster.main.name
-  }
-}
-
-# ==============================================================================
-# 5. SERVICE DISCOVERY (Cloud Map for Internal DNS Resolution)
-# ==============================================================================
-resource "aws_service_discovery_private_dns_namespace" "main" {
-  name        = "kamrial.local"
-  description = "Private DNS namespace for ECS microservices"
-  vpc         = aws_vpc.main.id
-}
-
-resource "aws_service_discovery_service" "rabbitmq" {
-  name = "rabbitmq"
-
-  dns_config {
-    namespace_id = aws_service_discovery_private_dns_namespace.main.id
-
-    dns_records {
-      ttl  = 10
-      type = "A"
-    }
-
-    routing_policy = "MULTIVALUE"
+    ClusterName = "${var.app_name}-cluster"
   }
 
-  health_check_custom_config {
-    failure_threshold = 1
-  }
+  tags = local.common_tags
 }
 
-# ==============================================================================
-# 6. APPLICATION LOAD BALANCER (ALB)
-# ==============================================================================
-resource "aws_lb" "main" {
-  name               = "kamrial-alb"
-  internal           = false
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb_sg.id]
-  subnets            = [aws_subnet.public_a.id, aws_subnet.public_b.id]
-}
+resource "aws_cloudwatch_metric_alarm" "rabbitmq_queue_depth_high" {
+  alarm_name          = "${var.app_name}-rabbitmq-queue-depth-high"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 2
+  metric_name         = "MessagesVisible"
+  namespace           = "Kamrial/RabbitMQ"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 10
+  alarm_description   = "Alarm triggered when RabbitMQ queue depth reaches or exceeds 10 messages, indicating worker processing failure or bottleneck."
 
-resource "aws_lb_target_group" "api" {
-  name        = "kamrial-api-tg"
-  port        = 8000
-  protocol    = "HTTP"
-  vpc_id      = aws_vpc.main.id
-  target_type = "ip"
-
-  health_check {
-    path                = "/"
-    healthy_threshold   = 2
-    unhealthy_threshold = 3
-    interval            = 15
-    timeout             = 5
-  }
-}
-
-resource "aws_lb_listener" "http" {
-  load_balancer_arn = aws_lb.main.arn
-  port              = 80
-  protocol          = "HTTP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.api.arn
-  }
-}
-
-# ==============================================================================
-# 7. DATABASE (RDS)
-# ==============================================================================
-resource "aws_db_subnet_group" "main" {
-  name       = "kamrial-db-subnet-group"
-  subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
-}
-
-resource "aws_db_instance" "postgres" {
-  allocated_storage           = 20
-  engine                      = "postgres"
-  engine_version              = "15"
-  instance_class              = "db.t4g.micro"
-  db_name                     = "kamrial_db"
-  username                    = "postgres"
-  manage_master_user_password = true
-  db_subnet_group_name        = aws_db_subnet_group.main.name
-  vpc_security_group_ids      = [aws_security_group.db_sg.id]
-  publicly_accessible         = false
-  skip_final_snapshot         = true
-}
-
-# ==============================================================================
-# 8. CONTAINER REGISTRIES, RABBITMQ QUEUE, TASKS & SERVICES
-# ==============================================================================
-resource "aws_ecr_repository" "api" { name = "kamrial-api" }
-resource "aws_ecr_repository" "worker" { name = "kamrial-worker" }
-
-resource "aws_ecs_cluster" "main" { name = "kamrial-cluster" }
-
-# RabbitMQ Message Broker Definition & Service
-resource "aws_ecs_task_definition" "rabbitmq" {
-  family                   = "kamrial-rabbitmq-task"
-  network_mode             = "awsvpc"
-  requires_compatibilities = ["FARGATE"]
-  cpu                      = "256"
-  memory                   = "512"
-  execution_role_arn       = aws_iam_role.ecs_execution.arn
-
-  container_definitions = jsonencode([{
-    name      = "rabbitmq"
-    image     = "rabbitmq:3-management-alpine"
-    essential = true
-    portMappings = [
-      { containerPort = 5672, hostPort = 5672 },
-      { containerPort = 15672, hostPort = 15672 }
-    ]
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        "awslogs-group"         = aws_cloudwatch_log_group.ecs.name
-        "awslogs-region"        = var.aws_region
-        "awslogs-stream-prefix" = "rabbitmq"
-      }
-    }
-  }])
-}
-
-resource "aws_ecs_service" "rabbitmq" {
-  name            = "kamrial-rabbitmq-service"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.rabbitmq.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
-
-  network_configuration {
-    subnets          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
-    security_groups  = [aws_security_group.app_sg.id]
-    assign_public_ip = false
+  dimensions = {
+    QueueName = "default_queue"
   }
 
-  service_registries {
-    registry_arn = aws_service_discovery_service.rabbitmq.arn
-  }
-}
-
-# API Task Definition & Service
-resource "aws_ecs_task_definition" "api" {
-  family                   = "kamrial-api-task"
-  network_mode             = "awsvpc"
-  requires_compatibilities = ["FARGATE"]
-  cpu                      = "256"
-  memory                   = "512"
-  execution_role_arn       = aws_iam_role.ecs_execution.arn
-
-  container_definitions = jsonencode([{
-    name      = "api"
-    image     = "${aws_ecr_repository.api.repository_url}:latest"
-    essential = true
-    portMappings = [{
-      containerPort = 8000
-      hostPort      = 8000
-    }]
-    environment = [{
-      name  = "RABBITMQ_HOST"
-      value = "rabbitmq.kamrial.local"
-    }]
-    secrets = [{
-      name      = "DB_PASSWORD"
-      valueFrom = aws_db_instance.postgres.master_user_secret[0].secret_arn
-    }]
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        "awslogs-group"         = aws_cloudwatch_log_group.ecs.name
-        "awslogs-region"        = var.aws_region
-        "awslogs-stream-prefix" = "api"
-      }
-    }
-  }])
-}
-
-resource "aws_ecs_service" "api" {
-  name            = "kamrial-api-service"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.api.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
-
-  network_configuration {
-    subnets          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
-    security_groups  = [aws_security_group.app_sg.id]
-    assign_public_ip = false
-  }
-
-  load_balancer {
-    target_group_arn = aws_lb_target_group.api.arn
-    container_name   = "api"
-    container_port   = 8000
-  }
-
-  depends_on = [
-    aws_lb_listener.http,
-    aws_iam_role_policy.read_db_secret,
-    aws_iam_role_policy_attachment.ecs_execution,
-    aws_ecs_service.rabbitmq
-  ]
-}
-
-# Worker Task Definition & Service
-resource "aws_ecs_task_definition" "worker" {
-  family                   = "kamrial-worker-task"
-  network_mode             = "awsvpc"
-  requires_compatibilities = ["FARGATE"]
-  cpu                      = "256"
-  memory                   = "512"
-  execution_role_arn       = aws_iam_role.ecs_execution.arn
-
-  container_definitions = jsonencode([{
-    name      = "worker"
-    image     = "${aws_ecr_repository.worker.repository_url}:latest"
-    essential = true
-    environment = [{
-      name  = "RABBITMQ_HOST"
-      value = "rabbitmq.kamrial.local"
-    }]
-    secrets = [{
-      name      = "DB_PASSWORD"
-      valueFrom = aws_db_instance.postgres.master_user_secret[0].secret_arn
-    }]
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        "awslogs-group"         = aws_cloudwatch_log_group.ecs.name
-        "awslogs-region"        = var.aws_region
-        "awslogs-stream-prefix" = "worker"
-      }
-    }
-  }])
-}
-
-resource "aws_ecs_service" "worker" {
-  name            = "kamrial-worker-service"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.worker.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
-
-  network_configuration {
-    subnets          = [aws_subnet.private_a.id, aws_subnet.private_b.id]
-    security_groups  = [aws_security_group.app_sg.id]
-    assign_public_ip = false
-  }
-
-  depends_on = [
-    aws_iam_role_policy.read_db_secret,
-    aws_iam_role_policy_attachment.ecs_execution,
-    aws_ecs_service.rabbitmq
-  ]
+  alarm_actions = []
+  tags          = local.common_tags
 }
