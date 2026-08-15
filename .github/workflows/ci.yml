@@ -59,23 +59,39 @@ jobs:
   deploy:
     name: Deploy to AWS ECS
     needs: [test, terraform-check]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.AWS_ROLE_ARN != null && secrets.AWS_ROLE_ARN != ''
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    env:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
     steps:
+      - name: Check AWS Secrets Availability
+        id: check_secrets
+        run: |
+          if [ -z "$AWS_ROLE_ARN" ]; then
+            echo "AWS_ROLE_ARN is not set. Skipping live deployment steps safely."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout Code
+        if: steps.check_secrets.outputs.skip != 'true'
         uses: actions/checkout@v4
 
       - name: Configure AWS Credentials
+        if: steps.check_secrets.outputs.skip != 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: us-east-1
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
 
       - name: Log in to Amazon ECR
+        if: steps.check_secrets.outputs.skip != 'true'
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build & Push API Image
+        if: steps.check_secrets.outputs.skip != 'true'
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
@@ -85,6 +101,7 @@ jobs:
           docker push $ECR_REGISTRY/kamrial-api:latest
 
       - name: Build & Push Worker Image
+        if: steps.check_secrets.outputs.skip != 'true'
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
@@ -94,10 +111,12 @@ jobs:
           docker push $ECR_REGISTRY/kamrial-worker:latest
 
       - name: Download API Task Definition
+        if: steps.check_secrets.outputs.skip != 'true'
         run: |
           aws ecs describe-task-definition --task-definition kamrial-api --query taskDefinition > task-def-api.json
 
       - name: Render API Task Definition
+        if: steps.check_secrets.outputs.skip != 'true'
         id: render-api
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
@@ -106,6 +125,7 @@ jobs:
           image: ${{ steps.login-ecr.outputs.registry }}/kamrial-api:${{ github.sha }}
 
       - name: Deploy API ECS Service
+        if: steps.check_secrets.outputs.skip != 'true'
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-api.outputs.task-definition }}
@@ -114,10 +134,12 @@ jobs:
           wait-for-service-stability: true
 
       - name: Download Worker Task Definition
+        if: steps.check_secrets.outputs.skip != 'true'
         run: |
           aws ecs describe-task-definition --task-definition kamrial-worker --query taskDefinition > task-def-worker.json
 
       - name: Render Worker Task Definition
+        if: steps.check_secrets.outputs.skip != 'true'
         id: render-worker
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
@@ -126,6 +148,7 @@ jobs:
           image: ${{ steps.login-ecr.outputs.registry }}/kamrial-worker:${{ github.sha }}
 
       - name: Deploy Worker ECS Service
+        if: steps.check_secrets.outputs.skip != 'true'
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-worker.outputs.task-definition }}
