@@ -62,3 +62,23 @@
 | **Second Cloud Provider** | ❌ No | Massive operational complexity and cross-cloud networking overhead. *Trigger:* Strict legal/regulatory multi-cloud mandates. |
 | **Full ELK Logging** | ❌ No | High memory footprint and maintenance cost. CloudWatch / Grafana Loki / stdout logging is sufficient today. *Trigger:* Log volume > 100GB/day requiring complex full-text querying. |
 | **Multi-Region HA** | ❌ No | Doubles compute/database replication costs and complicates data consistency. *Trigger:* Strict SLA requirement for 99.99% uptime with global user distribution. |
+## 5. Architectural Trade-Off Analysis
+
+### Scenario 1: Container Orchestration (Kubernetes vs. AWS ECS/Fargate)
+* **Decision:** Selected AWS ECS / AWS Fargate over Kubernetes (EKS).
+* **Rationale:** For a three-tier setup (API, Worker, PostgreSQL), Kubernetes introduces excessive control plane overhead ($73/month per EKS cluster base) and operational complexity (ingress controllers, CNI plugins, RBAC management). ECS/Fargate provides serverless container execution with zero cluster management overhead, automatic IAM role integration, and native scaling.
+* **When to Pivot to K8s:** Migration to EKS is justified only if service count expands beyond ~15 microservices, requires cloud-agnostic deployment specs (Helm), or demands complex mesh networking (Istio/Envoy).
+
+### Scenario 2: Multi-Cloud vs. Single-Cloud Strategy
+* **Decision:** Primary deployment restricted strictly to single-cloud (AWS).
+* **Rationale:** Multi-cloud deployments exponentially increase infrastructure cost, cross-cloud egress fees, identity management complexity, and latency. AWS native tooling (Terraform AWS provider, RDS, CloudWatch, Secrets Manager) allows maximum velocity and minimal operational headcount.
+* **Risk Mitigation:** Infrastructure is fully defined in standard Terraform modules with containerized workloads, allowing re-platforming to GCP or Azure within days if business continuity dictates.
+
+### Scenario 3: Centralized Logging & Observability (Self-Hosted ELK vs. Managed CloudWatch/Datadog)
+* **Decision:** Standardized on AWS CloudWatch + Container stdout/stderr streaming over self-hosted ELK (Elasticsearch/Logstash/Kibana).
+* **Rationale:** Self-hosting an ELK stack requires running resource-intensive Elasticsearch nodes (minimum 3x `t3.medium` instances for quorum) costing $100+/month in maintenance and storage overhead. Native CloudWatch log groups provide pay-per-ingest model with zero cluster management.
+* **Production Recommendation:** At higher scale (>50GB logs/day), adopt Datadog or Grafana Cloud rather than self-hosted ELK to preserve DevOps velocity.
+
+### Scenario 4: High Availability & Multi-Region Strategy
+* **Decision:** Multi-AZ deployment within a single primary AWS region (e.g., `us-east-1a` and `us-east-1b`).
+* **Rationale:** Multi-region active-active deployments require complex cross-region database replication (Aurora Global Database / DynamoDB Global Tables) and asynchronous conflict resolution, costing 3x-4x more. Multi-AZ provides 99.95% uptime for regional/datacenter failures at minimal extra cost.
