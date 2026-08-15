@@ -61,7 +61,7 @@ jobs:
   deploy:
     name: Deploy to AWS ECS
     needs: [test, terraform-check]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.AWS_ROLE_ARN != ''
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
