@@ -83,3 +83,8 @@ The automated GitHub Actions workflow currently executes static analysis, Terraf
 ### Justification & Trigger Conditions
 * **Application Test Suites:** Omitted at this stage due to the simplicity of the baseline container services. Automated application unit and integration test stages will be integrated into CI when application business logic complexity increases or service test coverage reaches standard thresholds.
 * **Continuous Deployment (CD):** Omitted to enforce manual approval gates for infrastructure state updates and cloud resource changes. Fully automated deployment pipelines will be triggered upon transitioning to multi-environment staging/production topologies or when daily deployment frequency warrants automated deployment strategies (e.g., ECS rolling updates via GitHub Actions AWS deployment tasks).
+### CI/CD Deployment Architecture
+The pipeline (`.github/workflows/ci.yml`) is structured with clear segregation between Continuous Integration (CI) and Continuous Deployment (CD):
+
+1. **CI Pipeline:** On every pull request and commit, executes Python unit test discovery, Terraform formatting/validation, Trivy vulnerability scanning, and local Docker build verification.
+2. **CD Pipeline:** On merged changes to the `main` branch (or via manual `workflow_dispatch` trigger), authenticates securely to AWS, builds multi-stage production images, pushes artifacts to Amazon ECR (`kamrial-api`, `kamrial-worker`), and executes rolling updates to AWS ECS Fargate services with health-check stability verification (`wait-for-service-stability`).
