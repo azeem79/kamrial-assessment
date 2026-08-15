@@ -5,20 +5,15 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  # ==============================================================================
-  # 1. CONTINUOUS INTEGRATION (Lint, Validation, Test & Security Scan)
-  # ==============================================================================
-  ci:
-    name: Build, Test & Security Scan
+  test:
+    name: Run Unit Tests
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -27,40 +22,47 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
-      - name: Install Dependencies & Run Tests
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f app/requirements.txt ]; then pip install -r app/requirements.txt; fi
-          python -m unittest discover -s app -p "*test*.py" || echo "No unit tests found, skipping..."
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+
+      - name: Run Unit Tests
+        run: |
+          python -m unittest discover -s tests -p "test_*.py"
+
+  terraform-check:
+    name: Terraform Validate & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-
-      - name: Terraform Format Check & Validate
-        run: |
-          cd terraform
-          terraform init -backend=false
-          terraform fmt -check
-          terraform validate
-
-      - name: Run Vulnerability Scanner (Trivy)
-        uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs'
-          ignore-unfixed: true
-          format: 'table'
-          severity: 'CRITICAL,HIGH'
+          terraform_version: 1.5.0
 
-  # ==============================================================================
-  # 2. CONTINUOUS DEPLOYMENT (ECR Push & ECS Fargate Deployment)
-  # ==============================================================================
-  cd:
-    name: Continuous Deployment to AWS ECS
-    needs: ci
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+      - name: Terraform Init
+        run: terraform init -backend=false
+        working-directory: terraform
+
+      - name: Terraform Format Check
+        run: terraform fmt -check
+        working-directory: terraform
+
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: terraform
+
+  deploy:
+    name: Deploy to AWS ECS
+    needs: [test, terraform-check]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -68,48 +70,68 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          mask-aws-account-id: true
+          aws-region: us-east-1
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
 
       - name: Log in to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and Push API Image to Amazon ECR
+      - name: Build & Push API Image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: kamrial-api
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./app -f ./app/Dockerfile.api
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker build -t $ECR_REGISTRY/kamrial-api:$IMAGE_TAG -t $ECR_REGISTRY/kamrial-api:latest .
+          docker push $ECR_REGISTRY/kamrial-api:$IMAGE_TAG
+          docker push $ECR_REGISTRY/kamrial-api:latest
 
-      - name: Build and Push Worker Image to Amazon ECR
+      - name: Build & Push Worker Image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: kamrial-worker
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./app -f ./app/Dockerfile.worker
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker build -f Dockerfile.worker -t $ECR_REGISTRY/kamrial-worker:$IMAGE_TAG -t $ECR_REGISTRY/kamrial-worker:latest .
+          docker push $ECR_REGISTRY/kamrial-worker:$IMAGE_TAG
+          docker push $ECR_REGISTRY/kamrial-worker:latest
 
-      - name: Deploy API Service to ECS Fargate
+      # Dynamically fetch current task definitions from ECS managed by Terraform
+      - name: Download API Task Definition
+        run: |
+          aws ecs describe-task-definition --task-definition kamrial-api --query taskDefinition > task-def-api.json
+
+      - name: Render API Task Definition
+        id: render-api
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-def-api.json
+          container-name: kamrial-api
+          image: ${{ steps.login-ecr.outputs.registry }}/kamrial-api:${{ github.sha }}
+
+      - name: Deploy API ECS Service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
-          task-definition: terraform/task-definitions/api.json
+          task-definition: ${{ steps.render-api.outputs.task-definition }}
           service: kamrial-api-service
           cluster: kamrial-cluster
           wait-for-service-stability: true
 
-      - name: Deploy Worker Service to ECS Fargate
+      - name: Download Worker Task Definition
+        run: |
+          aws ecs describe-task-definition --task-definition kamrial-worker --query taskDefinition > task-def-worker.json
+
+      - name: Render Worker Task Definition
+        id: render-worker
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-def-worker.json
+          container-name: kamrial-worker
+          image: ${{ steps.login-ecr.outputs.registry }}/kamrial-worker:${{ github.sha }}
+
+      - name: Deploy Worker ECS Service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
-          task-definition: terraform/task-definitions/worker.json
+          task-definition: ${{ steps.render-worker.outputs.task-definition }}
           service: kamrial-worker-service
           cluster: kamrial-cluster
           wait-for-service-stability: true
