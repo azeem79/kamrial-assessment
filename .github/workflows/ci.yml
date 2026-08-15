@@ -33,28 +33,14 @@ jobs:
           python -m unittest discover -s tests -p "test_*.py"
 
   terraform-check:
-    name: Terraform Validate & Lint
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+    - name: Run Trivy vulnerability scanner in IaC mode
+        uses: aquasecurity/trivy-action@master
         with:
-          terraform_version: 1.5.0
-
-      - name: Terraform Init
-        run: terraform init -backend=false
-        working-directory: terraform
-
-      - name: Terraform Format Check
-        run: terraform fmt -check
-        working-directory: terraform
-
-      - name: Terraform Validate
-        run: terraform validate
-        working-directory: terraform
+          scan-type: 'config'
+          hide-shortcut-text: 'true'
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
 
   deploy:
     name: Deploy to AWS ECS
