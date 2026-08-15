@@ -1,0 +1,265 @@
+﻿[2026-08-15 15:35:24] ==================================================
+[2026-08-15 15:35:24] INCIDENT SIMULATION & RECOVERY EVIDENCE LOG
+[2026-08-15 15:35:24] ==================================================
+[2026-08-15 15:35:24] 1. Starting full application stack...
+docker : time="2026-08-15T15:35:25+05:00" level=warning 
+msg="C:\\Users\\Administrator\\Desktop\\kamrial-assessment\\docker-compose.yml: the attribute `version` is obsolete, 
+it will be ignored, please remove it to avoid potential confusion"
+At C:\Users\Administrator\Desktop\kamrial-assessment\docs\incident_recovery.ps1:26 char:1
++ docker compose up -d --build 2>&1 | Out-File -FilePath $LogFile -Appe ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (time="2026-08-1...tial confusion":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Image kamrial-assessment-api Building 
+ Image kamrial-assessment-worker Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.09kB done
+#1 DONE 0.0s
+
+#2 [worker internal] load build definition from Dockerfile.worker
+#2 transferring dockerfile: 211B 0.0s done
+#2 DONE 0.1s
+
+#3 [api internal] load build definition from Dockerfile.api
+#3 transferring dockerfile: 231B 0.0s done
+#3 DONE 0.1s
+
+#4 [api internal] load metadata for docker.io/library/python:3.11-slim
+#4 DONE 1.6s
+
+#5 [worker internal] load .dockerignore
+#5 transferring context: 2B done
+#5 DONE 0.0s
+
+#6 [worker internal] load build context
+#6 transferring context: 393B done
+#6 DONE 0.0s
+
+#7 [worker 1/5] FROM docker.io/library/python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1
+#7 resolve docker.io/library/python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1 0.0s done
+#7 DONE 0.0s
+
+#8 [api 2/5] WORKDIR /app
+#8 CACHED
+
+#9 [api 3/5] COPY requirements.txt .
+#9 CACHED
+
+#10 [api 4/5] RUN pip install --no-cache-dir -r requirements.txt
+#10 CACHED
+
+#11 [api 5/5] COPY . .
+#11 DONE 0.1s
+
+#12 [api] exporting to image
+#12 exporting layers 0.1s done
+#12 exporting manifest sha256:9bf1ca3a03d0ff69cbf2d6d7290963f04e63fd6b3594bbb997e1e46218048094 0.0s done
+#12 exporting config sha256:6006ea36d5db8ea7d0b3e55daf5fbf3326856a28a92bf8fb81e94bbcb3c695ec 0.0s done
+#12 exporting attestation manifest sha256:b87b4df2bcc74effeb1572802cc22dfe48ca538093ff4c7996fba08bbf666bd0
+#12 exporting attestation manifest sha256:b87b4df2bcc74effeb1572802cc22dfe48ca538093ff4c7996fba08bbf666bd0 0.0s done
+#12 exporting manifest list sha256:cfdd49057f87ac3b7e4c00b23dd2d3eee555b642b1d4942c77c217ebf5e5fc13 0.0s done
+#12 naming to docker.io/library/kamrial-assessment-api:latest done
+#12 unpacking to docker.io/library/kamrial-assessment-api:latest 0.1s done
+#12 DONE 0.4s
+
+#13 [worker] exporting to image
+#13 exporting layers 0.1s done
+#13 exporting manifest sha256:65ec3071f60ea4fb8b3c9841df8393476b7c72b9638a8c2f765aec34b637bfd1 0.0s done
+#13 exporting config sha256:d5a532c1b2f067aa4e9ce245ac8bb3f0909813c7b82b7c66016042d5f3e3da26 0.0s done
+#13 exporting attestation manifest sha256:fd3eb83c15241ad857d46ca03bc248a05b508284efdb011dcd54962029aaf55b 0.0s done
+#13 exporting manifest list sha256:32b94090545d88edd8ca7b4e9f93c48d88a05c0e6f3d76ab9010ed80893855b9 0.0s done
+#13 naming to docker.io/library/kamrial-assessment-worker:latest done
+#13 unpacking to docker.io/library/kamrial-assessment-worker:latest 0.1s done
+#13 DONE 0.4s
+
+#14 [api] resolving provenance for metadata file
+#14 DONE 0.0s
+
+#15 [worker] resolving provenance for metadata file
+#15 DONE 0.0s
+ Image kamrial-assessment-api Built 
+ Image kamrial-assessment-worker Built 
+ Container kamrial-assessment-postgres-1 Running 
+ Container kamrial-assessment-rabbitmq-1 Running 
+ Container kamrial-assessment-worker-1 Recreate 
+ Container kamrial-assessment-api-1 Recreate 
+ Container kamrial-assessment-api-1 Recreated 
+ Container kamrial-assessment-worker-1 Recreated 
+ Container kamrial-assessment-api-1 Starting 
+ Container kamrial-assessment-worker-1 Starting 
+ Container kamrial-assessment-api-1 Started 
+ Container kamrial-assessment-worker-1 Started 
+[2026-08-15 15:35:41] 
+--- Live Container Status ---
+docker : time="2026-08-15T15:35:41+05:00" level=warning 
+msg="C:\\Users\\Administrator\\Desktop\\kamrial-assessment\\docker-compose.yml: the attribute `version` is obsolete, 
+it will be ignored, please remove it to avoid potential confusion"
+At C:\Users\Administrator\Desktop\kamrial-assessment\docs\incident_recovery.ps1:30 char:1
++ docker compose ps 2>&1 | Out-File -FilePath $LogFile -Append -Encodin ...
++ ~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (time="2026-08-1...tial confusion":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+NAME                            IMAGE                          COMMAND                  SERVICE    CREATED          STATUS         PORTS
+kamrial-assessment-api-1        kamrial-assessment-api         "python -m http.servΓÇª"   api        13 seconds ago   Up 8 seconds   0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp
+kamrial-assessment-postgres-1   postgres:15-alpine             "docker-entrypoint.sΓÇª"   postgres   15 hours ago     Up 15 hours    0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
+kamrial-assessment-rabbitmq-1   rabbitmq:3-management-alpine   "docker-entrypoint.sΓÇª"   rabbitmq   15 hours ago     Up 15 hours    0.0.0.0:5672->5672/tcp, [::]:5672->5672/tcp, 0.0.0.0:15672->15672/tcp, [::]:15672->15672/tcp
+kamrial-assessment-worker-1     kamrial-assessment-worker      "python -u worker.py"    worker     13 seconds ago   Up 8 seconds   
+[2026-08-15 15:35:41] 
+2. Publishing 5 baseline test jobs to RabbitMQ...
+docker : time="2026-08-15T15:35:41+05:00" level=warning 
+msg="C:\\Users\\Administrator\\Desktop\\kamrial-assessment\\docker-compose.yml: the attribute `version` is obsolete, 
+it will be ignored, please remove it to avoid potential confusion"
+At C:\Users\Administrator\Desktop\kamrial-assessment\docs\incident_recovery.ps1:34 char:1
++ docker compose exec -T api python producer.py 5 2>&1 | Out-File -File ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (time="2026-08-1...tial confusion":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ [x] Sent 'Test Job 1'
+ [x] Sent 'Test Job 2'
+ [x] Sent 'Test Job 3'
+ [x] Sent 'Test Job 4'
+ [x] Sent 'Test Job 5'
+[2026-08-15 15:35:44] 
+3. SIMULATING INCIDENT: Stopping Worker container...
+docker : time="2026-08-15T15:35:44+05:00" level=warning 
+msg="C:\\Users\\Administrator\\Desktop\\kamrial-assessment\\docker-compose.yml: the attribute `version` is obsolete, 
+it will be ignored, please remove it to avoid potential confusion"
+At C:\Users\Administrator\Desktop\kamrial-assessment\docs\incident_recovery.ps1:39 char:1
++ docker compose stop worker 2>&1 | Out-File -FilePath $LogFile -Append ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (time="2026-08-1...tial confusion":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container kamrial-assessment-worker-1 Stopping 
+ Container kamrial-assessment-worker-1 Stopped 
+[2026-08-15 15:35:48] 
+--- Live Container Status (Worker Down) ---
+docker : time="2026-08-15T15:35:48+05:00" level=warning 
+msg="C:\\Users\\Administrator\\Desktop\\kamrial-assessment\\docker-compose.yml: the attribute `version` is obsolete, 
+it will be ignored, please remove it to avoid potential confusion"
+At C:\Users\Administrator\Desktop\kamrial-assessment\docs\incident_recovery.ps1:42 char:1
++ docker compose ps 2>&1 | Out-File -FilePath $LogFile -Append -Encodin ...
++ ~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (time="2026-08-1...tial confusion":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+NAME                            IMAGE                          COMMAND                  SERVICE    CREATED          STATUS          PORTS
+kamrial-assessment-api-1        kamrial-assessment-api         "python -m http.servΓÇª"   api        20 seconds ago   Up 15 seconds   0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp
+kamrial-assessment-postgres-1   postgres:15-alpine             "docker-entrypoint.sΓÇª"   postgres   15 hours ago     Up 15 hours     0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
+kamrial-assessment-rabbitmq-1   rabbitmq:3-management-alpine   "docker-entrypoint.sΓÇª"   rabbitmq   15 hours ago     Up 15 hours     0.0.0.0:5672->5672/tcp, [::]:5672->5672/tcp, 0.0.0.0:15672->15672/tcp, [::]:15672->15672/tcp
+[2026-08-15 15:35:48] 
+4. Verifying API health while worker is offline...
+[2026-08-15 15:35:48] API Status Code: 200 OK (API remains available)
+[2026-08-15 15:35:48] 
+5. Publishing 10 additional jobs to build queue backlog...
+docker : time="2026-08-15T15:35:48+05:00" level=warning 
+msg="C:\\Users\\Administrator\\Desktop\\kamrial-assessment\\docker-compose.yml: the attribute `version` is obsolete, 
+it will be ignored, please remove it to avoid potential confusion"
+At C:\Users\Administrator\Desktop\kamrial-assessment\docs\incident_recovery.ps1:55 char:1
++ docker compose exec -T api python producer.py 10 2>&1 | Out-File -Fil ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (time="2026-08-1...tial confusion":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ [x] Sent 'Test Job 1'
+ [x] Sent 'Test Job 2'
+ [x] Sent 'Test Job 3'
+ [x] Sent 'Test Job 4'
+ [x] Sent 'Test Job 5'
+ [x] Sent 'Test Job 6'
+ [x] Sent 'Test Job 7'
+ [x] Sent 'Test Job 8'
+ [x] Sent 'Test Job 9'
+ [x] Sent 'Test Job 10'
+[2026-08-15 15:35:48] 
+6. Checking RabbitMQ queue depth before worker recovery...
+docker : time="2026-08-15T15:35:48+05:00" level=warning 
+msg="C:\\Users\\Administrator\\Desktop\\kamrial-assessment\\docker-compose.yml: the attribute `version` is obsolete, 
+it will be ignored, please remove it to avoid potential confusion"
+At C:\Users\Administrator\Desktop\kamrial-assessment\docs\incident_recovery.ps1:59 char:1
++ docker compose exec -T rabbitmq rabbitmqctl list_queues 2>&1 | Out-Fi ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (time="2026-08-1...tial confusion":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Timeout: 60.0 seconds ...
+Listing queues for vhost / ...
+name	messages
+task_queue	10
+[2026-08-15 15:35:49] 
+7. RECOVERY: Restarting Worker container...
+docker : time="2026-08-15T15:35:49+05:00" level=warning 
+msg="C:\\Users\\Administrator\\Desktop\\kamrial-assessment\\docker-compose.yml: the attribute `version` is obsolete, 
+it will be ignored, please remove it to avoid potential confusion"
+At C:\Users\Administrator\Desktop\kamrial-assessment\docs\incident_recovery.ps1:63 char:1
++ docker compose start worker 2>&1 | Out-File -FilePath $LogFile -Appen ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (time="2026-08-1...tial confusion":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container kamrial-assessment-worker-1 Starting 
+ Container kamrial-assessment-worker-1 Started 
+[2026-08-15 15:35:50] Waiting 15 seconds for worker to process and drain queue...
+[2026-08-15 15:36:05] 
+8. Verifying RabbitMQ queue depth after recovery (should be 0):
+docker : time="2026-08-15T15:36:05+05:00" level=warning 
+msg="C:\\Users\\Administrator\\Desktop\\kamrial-assessment\\docker-compose.yml: the attribute `version` is obsolete, 
+it will be ignored, please remove it to avoid potential confusion"
+At C:\Users\Administrator\Desktop\kamrial-assessment\docs\incident_recovery.ps1:70 char:1
++ docker compose exec -T rabbitmq rabbitmqctl list_queues 2>&1 | Out-Fi ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (time="2026-08-1...tial confusion":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Timeout: 60.0 seconds ...
+Listing queues for vhost / ...
+name	messages
+task_queue	0
+[2026-08-15 15:36:05] 
+9. Worker container processing logs:
+docker : time="2026-08-15T15:36:06+05:00" level=warning 
+msg="C:\\Users\\Administrator\\Desktop\\kamrial-assessment\\docker-compose.yml: the attribute `version` is obsolete, 
+it will be ignored, please remove it to avoid potential confusion"
+At C:\Users\Administrator\Desktop\kamrial-assessment\docs\incident_recovery.ps1:73 char:1
++ docker compose logs worker --tail=30 2>&1 | Out-File -FilePath $LogFi ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (time="2026-08-1...tial confusion":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+worker-1  |  [x] Received Test Job 2
+worker-1  |  [x] Done
+worker-1  |  [x] Received Test Job 3
+worker-1  |  [x] Done
+worker-1  |  [x] Received Test Job 4
+worker-1  |  [x] Done
+worker-1  |  [x] Received Test Job 5
+worker-1  |  [x] Done
+worker-1  | Worker starting up...
+worker-1  |  [*] Waiting for messages. To exit press CTRL+C
+worker-1  |  [x] Received Test Job 1
+worker-1  |  [x] Done
+worker-1  |  [x] Received Test Job 2
+worker-1  |  [x] Done
+worker-1  |  [x] Received Test Job 3
+worker-1  |  [x] Done
+worker-1  |  [x] Received Test Job 4
+worker-1  |  [x] Done
+worker-1  |  [x] Received Test Job 5
+worker-1  |  [x] Done
+worker-1  |  [x] Received Test Job 6
+worker-1  |  [x] Done
+worker-1  |  [x] Received Test Job 7
+worker-1  |  [x] Done
+worker-1  |  [x] Received Test Job 8
+worker-1  |  [x] Done
+worker-1  |  [x] Received Test Job 9
+worker-1  |  [x] Done
+worker-1  |  [x] Received Test Job 10
+worker-1  |  [x] Done
+[2026-08-15 15:36:06] 
+==================================================
+[2026-08-15 15:36:06] INCIDENT RECOVERY COMPLETED SUCCESSFULLY
+[2026-08-15 15:36:06] ==================================================

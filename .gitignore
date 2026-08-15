@@ -1,0 +1,9 @@
+# Credentials & Secrets
+db_password.txt
+
+# Terraform local state & files
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+.env
