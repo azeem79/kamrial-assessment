@@ -48,7 +48,7 @@ terraform plan
 ---
 
 ## CI/CD
-
+> **Pipeline Note:** Historical workflow runs reflect iterative development, security hardening, and pipeline troubleshooting. The current main branch reflects the fully validated, production-ready CI/CD implementation.
 `.github/workflows/ci.yml` runs on every push/PR to `main`: Terraform format/validate, a Trivy security scan, and Docker build tests for both the API and worker images.
 
 ---
